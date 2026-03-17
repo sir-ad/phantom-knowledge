@@ -1,0 +1,29 @@
+{
+  "name": "@phantom-pm/knowledge",
+  "version": "0.1.0",
+  "description": "Phantom Knowledge Layer - Vector embeddings, RAG, and connectors",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc -w",
+    "test": "node --test dist/**/*.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  },
+  "peerDependencies": {
+    "openai": "^4.0.0"
+  },
+  "keywords": [
+    "phantom",
+    "knowledge",
+    "rag",
+    "embeddings",
+    "vector"
+  ],
+  "author": "",
+  "license": "ISC"
+}
