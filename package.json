@@ -1,10 +1,13 @@
 {
   "name": "@phantom-pm/knowledge",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Phantom Knowledge Layer - Vector embeddings, RAG, and connectors for Phantom PM OS",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "phantom-knowledge": "./cli/index.js"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/sir-ad/phantom-knowledge.git"
