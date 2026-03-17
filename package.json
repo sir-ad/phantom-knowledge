@@ -1,14 +1,24 @@
 {
   "name": "@phantom-pm/knowledge",
-  "version": "0.1.0",
-  "description": "Phantom Knowledge Layer - Vector embeddings, RAG, and connectors",
+  "version": "1.0.0",
+  "description": "Phantom Knowledge Layer - Vector embeddings, RAG, and connectors for Phantom PM OS",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sir-ad/phantom-knowledge.git"
+  },
+  "homepage": "https://github.com/sir-ad/phantom-knowledge",
+  "bugs": {
+    "url": "https://github.com/sir-ad/phantom-knowledge/issues"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc -w",
-    "test": "node --test dist/**/*.test.js"
+    "test": "node --test dist/**/*.test.js",
+    "lint": "eslint src/",
+    "format": "prettier --write src/"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
@@ -19,11 +29,19 @@
   },
   "keywords": [
     "phantom",
+    "phantom-pm",
     "knowledge",
     "rag",
     "embeddings",
-    "vector"
+    "vector",
+    "llm",
+    "ai",
+    "pm",
+    "product-management"
   ],
-  "author": "",
-  "license": "ISC"
+  "author": "Adarsh Agrahari",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }
