@@ -1,21 +1,30 @@
-// Knowledge Engine
-// Main orchestrator for the knowledge layer
+// Knowledge Engine - main orchestrator
 
 import { Embeddings } from './embeddings.js';
 import { VectorStore } from './vector-store.js';
 import { RAGQuery } from './rag-query.js';
 import { CitationTracker } from './citations.js';
-import { GitHubConnector } from './connectors/github.js';
-import { Document, QueryResult, EmbeddingOptions, VectorStoreOptions } from './types.js';
+import type { Document, QueryResult, EmbeddingOptions, VectorStoreOptions, Connector } from './types.js';
 
-export interface KnowledgeEngineConfig {
-  embeddings: EmbeddingOptions;
-  vectorStore: VectorStoreOptions;
-  llm?: {
-    model?: string;
-    apiKey?: string;
-    baseUrl?: string;
-  };
+// Error codes
+export enum KnowledgeErrorCode {
+  NOT_INITIALIZED = 'KNOWLEDGE_001',
+  CONNECTOR_FAILED = 'KNOWLEDGE_002',
+  EMBEDDING_FAILED = 'KNOWLEDGE_003',
+  VECTOR_STORE_ERROR = 'KNOWLEDGE_004',
+  LLM_QUERY_FAILED = 'KNOWLEDGE_005',
+  RATE_LIMIT_EXCEEDED = 'KNOWLEDGE_006'
+}
+
+export class KnowledgeError extends Error {
+  constructor(
+    public code: KnowledgeErrorCode,
+    message: string,
+    public originalError?: Error
+  ) {
+    super(message);
+    this.name = 'KnowledgeError';
+  }
 }
 
 export class KnowledgeEngine {
@@ -23,90 +32,94 @@ export class KnowledgeEngine {
   private vectorStore: VectorStore;
   private ragQuery: RAGQuery;
   private citations: CitationTracker;
-  private connectors: Map<string, any> = new Map();
+  private connectors = new Map<string, Connector>();
   private initialized = false;
 
-  constructor(config: KnowledgeEngineConfig) {
-    this.embeddings = new Embeddings(config.embeddings);
-    this.vectorStore = new VectorStore(this.embeddings, config.vectorStore);
+  constructor(
+    embOptions: EmbeddingOptions,
+    vsOptions: VectorStoreOptions,
+    llmOptions: { model?: string } = {}
+  ) {
+    // Auto-detect from env if not provided
+    const apiKey = process.env.OPENAI_API_KEY;
+    const ollamaUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+    
+    this.embeddings = new Embeddings({
+      provider: embOptions.provider,
+      model: embOptions.model,
+      apiKey,
+      baseUrl: ollamaUrl
+    });
+    this.vectorStore = new VectorStore(this.embeddings, vsOptions);
     this.citations = new CitationTracker();
-    this.ragQuery = new RAGQuery(this.vectorStore, this.citations, config.llm);
+    this.ragQuery = new RAGQuery(this.vectorStore, this.citations, llmOptions);
   }
 
   async initialize(): Promise<void> {
     await this.vectorStore.initialize();
     this.initialized = true;
-    console.log('✅ Knowledge Engine initialized');
   }
 
-  // Add a document directly
-  async addDocument(doc: Document): Promise<void> {
-    this.ensureInitialized();
+  async addDocument(doc: Omit<Document, 'embeddedAt'>): Promise<void> {
     await this.vectorStore.addDocument(doc);
   }
 
-  // Add multiple documents
-  async addDocuments(docs: Document[]): Promise<void> {
-    this.ensureInitialized();
+  async addDocuments(docs: Omit<Document, 'embeddedAt'>[]): Promise<void> {
     await this.vectorStore.addDocuments(docs);
   }
 
-  // Query the knowledge base
-  async query(prompt: string, options?: { maxTokens?: number; temperature?: number }): Promise<QueryResult> {
-    this.ensureInitialized();
-    return this.ragQuery.query(prompt, options);
+  async query(prompt: string): Promise<QueryResult> {
+    return this.ragQuery.query(prompt);
   }
 
-  // Chat with context
-  async chat(message: string, history: { role: string; content: string }[] = []): Promise<QueryResult> {
-    this.ensureInitialized();
-    return this.ragQuery.chat(message, history);
-  }
-
-  // Register a connector
-  registerConnector(name: string, connector: any): void {
+  registerConnector(name: string, connector: Connector): void {
     this.connectors.set(name, connector);
   }
 
-  // Sync from a connector
   async syncConnector(name: string): Promise<void> {
     const connector = this.connectors.get(name);
-    if (!connector) {
-      throw new Error(`Connector ${name} not found`);
-    }
-
+    if (!connector) throw new KnowledgeError(
+      KnowledgeErrorCode.CONNECTOR_FAILED,
+      `Connector ${name} not found`
+    );
     await connector.connect();
     const docs = await connector.fetch();
     await this.addDocuments(docs);
-    
-    console.log(`📥 Synced ${docs.length} documents from ${name}`);
   }
 
-  // Get stats
   getStats() {
     return {
       documentCount: this.vectorStore.count(),
-      sources: [...new Set(this.vectorStore.getAllDocuments().map(d => d.source))],
-      topCitations: this.citations.getTopSources()
+      sources: [...new Set(this.vectorStore.getAllDocuments().map(d => d.source))]
     };
   }
 
-  // Search without LLM (just vector similarity)
-  async semanticSearch(query: string, limit: number = 5) {
-    this.ensureInitialized();
+  async semanticSearch(query: string, limit = 5) {
     return this.vectorStore.search(query, limit);
   }
 
-  private ensureInitialized() {
-    if (!this.initialized) {
-      throw new Error('Knowledge Engine not initialized. Call initialize() first.');
-    }
+  async chat(message: string): Promise<QueryResult> {
+    return this.query(message);
+  }
+
+  listConnectors() {
+    return Array.from(this.connectors.keys()).map(name => ({
+      name,
+      ready: this.initialized
+    }));
+  }
+
+  async clear(): Promise<void> {
+    await this.vectorStore.clear();
   }
 }
 
-// Factory function for easy creation
-export async function createKnowledgeEngine(config: KnowledgeEngineConfig): Promise<KnowledgeEngine> {
-  const engine = new KnowledgeEngine(config);
+export async function createKnowledgeEngine(config: {
+  embeddings: EmbeddingOptions;
+  vectorStore: VectorStoreOptions;
+  llm?: { model?: string };
+}): Promise<KnowledgeEngine> {
+  const engine = new KnowledgeEngine(config.embeddings, config.vectorStore, config.llm);
   await engine.initialize();
   return engine;
 }

@@ -1,4 +1,4 @@
-// Knowledge Layer Types
+// Types for Phantom Knowledge Layer
 
 export interface Document {
   id: string;
@@ -31,32 +31,49 @@ export interface QueryResult {
 export interface EmbeddingOptions {
   provider: 'openai' | 'ollama';
   model?: string;
-  dimensions?: number;
 }
 
 export interface VectorStoreOptions {
-  type: 'memory' | 'file' | 'pinecone';
+  type: 'memory' | 'file';
   path?: string;
-  apiKey?: string;
-}
-
-export interface KnowledgeIndex {
-  addDocument(doc: Document): Promise<void>;
-  addDocuments(docs: Document[]): Promise<void>;
-  search(query: string, limit?: number): Promise<EmbeddedDocument[]>;
-  delete(id: string): Promise<void>;
-  clear(): Promise<void>;
 }
 
 export interface RAGOptions {
   maxTokens?: number;
   temperature?: number;
-  includeCitations?: boolean;
 }
 
 export interface Connector {
   name: string;
   connect(): Promise<void>;
   fetch(): Promise<Document[]>;
-  sync(): Promise<void>;
+}
+
+export interface ConnectorInfo {
+  name: string;
+  ready: boolean;
+}
+
+export interface Stats {
+  documentCount: number;
+  sources: string[];
+}
+
+export interface SyncResult {
+  connector: string;
+  documentsAdded: number;
+  timestamp: number;
+}
+
+export interface KnowledgeConfig {
+  embeddings: EmbeddingOptions;
+  vectorStore: VectorStoreOptions;
+  llm?: {
+    model?: string;
+  };
+  github?: {
+    token: string;
+    owner: string;
+    repo: string;
+  };
 }

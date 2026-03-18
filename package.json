@@ -1,50 +1,34 @@
 {
   "name": "@phantom-pm/knowledge",
-  "version": "1.1.0",
-  "description": "Phantom Knowledge Layer - Vector embeddings, RAG, and connectors for Phantom PM OS",
+  "version": "2.0.0",
+  "description": "Phantom Knowledge Layer - Vector embeddings, RAG, and connectors",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "phantom-knowledge": "./cli/index.js"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/sir-ad/phantom-knowledge.git"
-  },
-  "homepage": "https://github.com/sir-ad/phantom-knowledge",
-  "bugs": {
-    "url": "https://github.com/sir-ad/phantom-knowledge/issues"
+    "phantom-knowledge": "./dist/cli/index.js"
   },
   "scripts": {
     "build": "tsc",
+    "build:cli": "tsc -p cli/tsconfig.json",
     "dev": "tsc -w",
-    "test": "node --test dist/**/*.test.js",
-    "lint": "eslint src/",
-    "format": "prettier --write src/"
+    "test": "vitest",
+    "bench": "npx tsx bench.ts",
+    "lint": "eslint src --ext .ts",
+    "format": "prettier --write \"src/**/*.ts\""
+  },
+  "dependencies": {
+    "commander": "^11.0.0",
+    "dotenv": "^16.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "typescript": "^5.3.0"
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0",
+    "eslint": "^8.0.0",
+    "prettier": "^3.0.0"
   },
-  "peerDependencies": {
-    "openai": "^4.0.0"
-  },
-  "keywords": [
-    "phantom",
-    "phantom-pm",
-    "knowledge",
-    "rag",
-    "embeddings",
-    "vector",
-    "llm",
-    "ai",
-    "pm",
-    "product-management"
-  ],
+  "keywords": ["phantom", "knowledge", "rag", "embeddings", "vector", "ai"],
   "author": "Adarsh Agrahari",
-  "license": "MIT",
-  "engines": {
-    "node": ">=18.0.0"
-  }
+  "license": "MIT"
 }

@@ -1,0 +1,17 @@
+# CODEOWNERS - Phantom Knowledge
+
+# Core Modules
+src/embeddings.ts       @phantom-pm/core
+src/vector-store.ts     @phantom-pm/core
+src/rag-query.ts       @phantom-pm/core
+
+# Connectors
+src/connectors/github.ts @phantom-pm/core
+
+# CLI
+cli/                    @phantom-pm/cli
+
+# Review required for
+# - Security changes
+# - API changes
+# - Breaking changes

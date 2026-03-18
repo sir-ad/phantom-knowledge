@@ -1,133 +1,96 @@
-// Vector Store Module
-// Stores and retrieves embeddings with similarity search
+// Vector store - document storage and search
 
-import { EmbeddedDocument, VectorStoreOptions, KnowledgeIndex } from './types.js';
 import { Embeddings } from './embeddings.js';
-import { readFile, writeFile, mkdir, access, readdir } from 'fs/promises';
-import { join } from 'path';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import type { Document, EmbeddedDocument, VectorStoreOptions } from './types.js';
 
 interface VectorStoreData {
-  documents: EmbeddedDocument[];
   version: number;
+  documents: EmbeddedDocument[];
 }
 
-export class VectorStore implements KnowledgeIndex {
-  private documents: Map<string, EmbeddedDocument> = new Map();
+export class VectorStore {
+  private documents = new Map<string, EmbeddedDocument>();
   private embeddings: Embeddings;
   private storagePath?: string;
-  private storageType: 'memory' | 'file' | 'pinecone';
+  private storeType: 'memory' | 'file';
 
-  constructor(embeddings: Embeddings, options: VectorStoreOptions) {
-    this.embeddings = embeddings;
-    this.storageType = options.type;
-    this.storagePath = options.path;
+  constructor(emb: Embeddings, options: VectorStoreOptions) {
+    this.embeddings = emb;
+    this.storeType = options.type || 'memory';
+    this.storagePath = options.path || path.join(os.homedir(), '.phantom', 'knowledge.json');
   }
 
   async initialize(): Promise<void> {
-    if (this.storageType === 'file' && this.storagePath) {
-      await this.loadFromFile();
+    if (this.storeType === 'file' && this.storagePath) {
+      const dir = path.dirname(this.storagePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      if (fs.existsSync(this.storagePath)) {
+        try {
+          const data = JSON.parse(fs.readFileSync(this.storagePath, 'utf-8')) as VectorStoreData;
+          if (data.documents) {
+            data.documents.forEach((doc: EmbeddedDocument) => {
+              this.documents.set(doc.id, doc);
+            });
+          }
+        } catch (e) {
+          console.warn('Failed to load vector store:', e);
+        }
+      }
     }
   }
 
-  async addDocument(doc: { id: string; content: string; source: string; sourceUrl?: string; metadata: Record<string, unknown> }): Promise<void> {
-    const embedding = await this.embeddings.embed(doc.content);
-    
-    const embeddedDoc: EmbeddedDocument = {
-      ...doc,
-      embedding,
-      embeddedAt: Date.now()
-    };
-
-    this.documents.set(doc.id, embeddedDoc);
-
-    if (this.storageType === 'file') {
-      await this.saveToFile();
-    }
-  }
-
-  async addDocuments(docs: { id: string; content: string; source: string; sourceUrl?: string; metadata: Record<string, unknown> }[]): Promise<void> {
-    const contents = docs.map(d => d.content);
-    const embeddings = await this.embeddings.embedBatch(contents);
-
-    docs.forEach((doc, i) => {
-      const embeddedDoc: EmbeddedDocument = {
-        ...doc,
-        embedding: embeddings[i],
-        embeddedAt: Date.now()
+  private async save(): Promise<void> {
+    if (this.storeType === 'file' && this.storagePath) {
+      const data: VectorStoreData = {
+        version: 1,
+        documents: Array.from(this.documents.values())
       };
-      this.documents.set(doc.id, embeddedDoc);
+      fs.writeFileSync(this.storagePath, JSON.stringify(data, null, 2));
+    }
+  }
+
+  async addDocument(doc: Omit<Document, 'embeddedAt'>): Promise<void> {
+    const embedding = await this.embeddings.embed(doc.content);
+    const embedded = { ...doc, embedding, embeddedAt: Date.now() };
+    this.documents.set(doc.id, embedded);
+    await this.save();
+  }
+
+  async addDocuments(docs: Omit<Document, 'embeddedAt'>[]): Promise<void> {
+    const embeddings = await this.embeddings.embedBatch(docs.map(d => d.content));
+    docs.forEach((doc, i) => {
+      this.documents.set(doc.id, { ...doc, embedding: embeddings[i], embeddedAt: Date.now() });
     });
-
-    if (this.storageType === 'file') {
-      await this.saveToFile();
-    }
+    await this.save();
   }
 
-  async search(query: string, limit: number = 5): Promise<EmbeddedDocument[]> {
+  async search(query: string, limit = 5): Promise<EmbeddedDocument[]> {
     const queryEmbedding = await this.embeddings.embed(query);
-    
-    const results: { doc: EmbeddedDocument; score: number }[] = [];
-
-    for (const doc of this.documents.values()) {
-      const score = this.embeddings.cosineSimilarity(queryEmbedding, doc.embedding);
-      results.push({ doc, score });
-    }
-
-    // Sort by score descending
-    results.sort((a, b) => b.score - a.score);
-
+    const results = Array.from(this.documents.values())
+      .map(doc => ({ doc, score: this.embeddings.cosineSimilarity(queryEmbedding, doc.embedding) }))
+      .sort((a, b) => b.score - a.score);
     return results.slice(0, limit).map(r => r.doc);
-  }
-
-  async delete(id: string): Promise<void> {
-    this.documents.delete(id);
-    if (this.storageType === 'file') {
-      await this.saveToFile();
-    }
-  }
-
-  async clear(): Promise<void> {
-    this.documents.clear();
-    if (this.storageType === 'file') {
-      await this.saveToFile();
-    }
   }
 
   getDocument(id: string): EmbeddedDocument | undefined {
     return this.documents.get(id);
   }
 
-  getAllDocuments(): EmbeddedDocument[] {
-    return Array.from(this.documents.values());
-  }
-
   count(): number {
     return this.documents.size;
   }
 
-  private async saveToFile(): Promise<void> {
-    if (!this.storagePath) return;
-
-    const data: VectorStoreData = {
-      documents: Array.from(this.documents.values()),
-      version: 1
-    };
-
-    await writeFile(this.storagePath, JSON.stringify(data, null, 2), 'utf-8');
+  getAllDocuments(): EmbeddedDocument[] {
+    return Array.from(this.documents.values());
   }
 
-  private async loadFromFile(): Promise<void> {
-    if (!this.storagePath) return;
-
-    try {
-      await access(this.storagePath);
-      const content = await readFile(this.storagePath, 'utf-8');
-      const data: VectorStoreData = JSON.parse(content);
-      
-      this.documents = new Map(data.documents.map(d => [d.id, d]));
-    } catch {
-      // File doesn't exist yet, start fresh
-      this.documents = new Map();
-    }
+  async clear(): Promise<void> {
+    this.documents.clear();
+    await this.save();
   }
 }

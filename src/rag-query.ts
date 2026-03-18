@@ -1,113 +1,67 @@
-// RAG Query Engine
-// Retrieves relevant context and generates answers with citations
+// RAG Query Engine with fallback strategies
 
 import { VectorStore } from './vector-store.js';
 import { CitationTracker } from './citations.js';
-import { QueryResult, Citation, RAGOptions } from './types.js';
+import type { QueryResult, RAGOptions } from './types.js';
 
 export class RAGQuery {
   private vectorStore: VectorStore;
   private citations: CitationTracker;
   private model: string;
   private apiKey?: string;
-  private baseUrl?: string;
 
-  constructor(
-    vectorStore: VectorStore,
-    citations: CitationTracker,
-    options: { model?: string; apiKey?: string; baseUrl?: string } = {}
-  ) {
-    this.vectorStore = vectorStore;
-    this.citations = citations;
+  constructor(vs: VectorStore, cit: CitationTracker, options: { model?: string } = {}) {
+    this.vectorStore = vs;
+    this.citations = cit;
     this.model = options.model || 'gpt-4o-mini';
-    this.apiKey = options.apiKey || process.env.OPENAI_API_KEY;
-    this.baseUrl = options.baseUrl;
+    this.apiKey = process.env.OPENAI_API_KEY;
   }
 
   async query(prompt: string, options: RAGOptions = {}): Promise<QueryResult> {
-    const {
-      maxTokens = 4000,
-      temperature = 0.7,
-      includeCitations = true
-    } = options;
+    const { maxTokens = 4000, temperature = 0.7 } = options;
+    const docs = await this.vectorStore.search(prompt, 10);
 
-    // Step 1: Retrieve relevant documents
-    const relevantDocs = await this.vectorStore.search(prompt, 10);
-
-    if (relevantDocs.length === 0) {
-      return {
-        answer: "I don't have any relevant information to answer that question.",
-        citations: [],
-        sources: [],
-        contextUsed: 0
-      };
+    if (docs.length === 0) {
+      return { answer: "No relevant information found.", citations: [], sources: [], contextUsed: 0 };
     }
 
-    // Step 2: Build context from retrieved documents
-    const context = relevantDocs
-      .map((doc, i) => `[${i + 1}] ${doc.source}: ${doc.content}`)
-      .join('\n\n');
+    const context = docs.map((d, i) => `[${i + 1}] ${d.source}: ${d.content}`).join('\n\n');
+    const sources = [...new Set(docs.map(d => d.source))];
+    
+    const citationList = docs.map((d, i) => ({
+      documentId: d.id,
+      source: d.source,
+      sourceUrl: d.sourceUrl,
+      excerpt: d.content.slice(0, 200),
+      relevanceScore: 1 - i * 0.1
+    }));
+    this.citations.addCitations(citationList);
 
-    // Step 3: Track citations
-    const citationList: Citation[] = [];
-    const sources: string[] = [];
-
-    if (includeCitations) {
-      relevantDocs.forEach((doc, i) => {
-        citationList.push({
-          documentId: doc.id,
-          source: doc.source,
-          sourceUrl: doc.sourceUrl,
-          excerpt: doc.content.slice(0, 200) + '...',
-          relevanceScore: 1 - (i * 0.1) // Decreasing relevance score
-        });
-        
-        if (!sources.includes(doc.source)) {
-          sources.push(doc.source);
-        }
-      });
-
-      this.citations.addCitations(citationList);
-    }
-
-    // Step 4: Generate answer using LLM
-    const systemPrompt = `You are a helpful assistant. Use the provided context to answer the user's question.
-If you use information from the context, cite it using the source name in brackets.
-If the context doesn't contain enough information to answer the question, say so.`;
-
-    const userPrompt = `Context:
-${context}
-
-Question: ${prompt}
-
-Answer:`;
-
+    // Try LLM, fallback to raw context
     let answer: string;
-
     try {
-      answer = await this.generateAnswer(systemPrompt, userPrompt, {
-        maxTokens,
-        temperature
-      });
-    } catch (error) {
-      // Fallback: summarize from context
-      answer = this.summarizeFromContext(relevantDocs, prompt);
+      answer = await this.generateAnswer(context, prompt, { maxTokens, temperature });
+    } catch (e) {
+      // Fallback: return raw context summary
+      console.warn('LLM query failed, using fallback:', e);
+      answer = this.fallbackAnswer(context, prompt, docs);
     }
 
-    return {
-      answer,
-      citations: citationList,
-      sources,
-      contextUsed: relevantDocs.length
-    };
+    return { answer, citations: citationList, sources, contextUsed: docs.length };
   }
 
-  private async generateAnswer(
-    systemPrompt: string,
-    userPrompt: string,
-    options: { maxTokens: number; temperature: number }
-  ): Promise<string> {
-    const response = await fetch((this.baseUrl || 'https://api.openai.com/v1') + '/chat/completions', {
+  private fallbackAnswer(context: string, prompt: string, docs: any[]): string {
+    // Return raw context summary when LLM fails
+    const topDoc = docs[0];
+    return `Based on ${docs.length} relevant document(s):\n\n${topDoc.content.slice(0, 800)}\n\n[Sources: ${docs.map(d => d.source).join(', ')}]`;
+  }
+
+  private async generateAnswer(context: string, prompt: string, options: { maxTokens: number; temperature: number }): Promise<string> {
+    if (!this.apiKey) {
+      throw new Error('OpenAI API key not configured');
+    }
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -116,8 +70,8 @@ Answer:`;
       body: JSON.stringify({
         model: this.model,
         messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
+          { role: 'system', content: 'You are a helpful assistant. Use context to answer. Cite sources.' },
+          { role: 'user', content: `Context:\n${context}\n\nQuestion: ${prompt}\n\nAnswer:` }
         ],
         max_tokens: options.maxTokens,
         temperature: options.temperature
@@ -125,29 +79,10 @@ Answer:`;
     });
 
     if (!response.ok) {
-      throw new Error(`LLM query failed: ${response.statusText}`);
+      throw new Error(`LLM API error: ${response.statusText}`);
     }
 
     const data = await response.json() as { choices: { message: { content: string } }[] };
     return data.choices[0].message.content;
-  }
-
-  private summarizeFromContext(docs: { source: string; content: string }[], query: string): string {
-    const sources = [...new Set(docs.map(d => d.source))].join(', ');
-    
-    return `Based on the available information from ${sources}:\n\n${
-      docs.slice(0, 3).map(d => d.content).join('\n\n')
-    }\n\nNote: This is a simplified answer. For more accurate results, please configure an LLM API key.`;
-  }
-
-  // Get conversation context
-  async chat(message: string, history: { role: string; content: string }[] = []): Promise<QueryResult> {
-    const result = await this.query(message);
-    
-    // Add to history
-    history.push({ role: 'user', content: message });
-    history.push({ role: 'assistant', content: result.answer });
-
-    return result;
   }
 }

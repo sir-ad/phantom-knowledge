@@ -2,6 +2,10 @@ node_modules/
 dist/
 *.log
 .env
-.env.local
 .DS_Store
-dist/
+**/PRD*
+**/prd*
+**/*implementation*
+**/*secret*
+**/*password*
+**/*token*
